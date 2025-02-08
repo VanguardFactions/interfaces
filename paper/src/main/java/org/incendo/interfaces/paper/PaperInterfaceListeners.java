@@ -48,6 +48,7 @@ import org.incendo.interfaces.paper.pane.PlayerPane;
 import org.incendo.interfaces.paper.type.ChestInterface;
 import org.incendo.interfaces.paper.type.CloseHandler;
 import org.incendo.interfaces.paper.type.CombinedInterface;
+import org.incendo.interfaces.paper.type.OpenHandler;
 import org.incendo.interfaces.paper.view.ChestView;
 import org.incendo.interfaces.paper.view.CombinedView;
 import org.incendo.interfaces.paper.view.PlayerInventoryView;
@@ -149,6 +150,7 @@ public class PaperInterfaceListeners implements Listener {
      * @param event the event
      */
     @EventHandler
+    @SuppressWarnings("unchecked")
     public void onInventoryOpen(final @NonNull InventoryOpenEvent event) {
         Inventory inventory = event.getInventory();
         InventoryHolder holder = inventory.getHolder();
@@ -157,9 +159,13 @@ public class PaperInterfaceListeners implements Listener {
             return;
         }
 
-        if (holder instanceof PlayerView) {
-            PlayerView<?> view = (PlayerView<?>) holder;
+        if (holder instanceof final PlayerView<?> view) {
             this.addOpenView(view);
+            if (view.backing() instanceof final ChestInterface chestInterface) {
+                for (final OpenHandler<ChestPane> openHandler : chestInterface.openHandlers()) {
+                    openHandler.accept(event, (PlayerView<ChestPane>) view);
+                }
+            }
         }
     }
 
@@ -219,20 +225,13 @@ public class PaperInterfaceListeners implements Listener {
             return;
         }
 
-        if (holder instanceof PlayerView) {
-            PlayerView<?> playerView = (PlayerView<?>) holder;
-
-            if (playerView.backing() instanceof ChestInterface) {
-                final ChestInterface chestInterface = (ChestInterface) playerView.backing();
-
+        if (holder instanceof final PlayerView<?> playerView) {
+            if (playerView.backing() instanceof final ChestInterface chestInterface) {
                 for (final CloseHandler<ChestPane> closeHandler : chestInterface.closeHandlers()) {
                     closeHandler.accept(event, (PlayerView<ChestPane>) playerView);
                 }
             }
-
-            if (playerView.backing() instanceof CombinedInterface) {
-                final CombinedInterface combinedInterface = (CombinedInterface) playerView.backing();
-
+            if (playerView.backing() instanceof final CombinedInterface combinedInterface) {
                 for (final CloseHandler<CombinedPane> closeHandler : combinedInterface.closeHandlers()) {
                     closeHandler.accept(event, (PlayerView<CombinedPane>) playerView);
                 }

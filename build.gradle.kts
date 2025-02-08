@@ -20,7 +20,7 @@ plugins {
 }
 
 group = "org.incendo.interfaces"
-version = "1.0.0-SNAPSHOT"
+version = "1.0.1-SNAPSHOT"
 description = "A builder-style user interface library."
 
 subprojects {
@@ -47,8 +47,8 @@ subprojects {
         mitLicense()
 
         javaVersions {
-            minimumToolchain(17)
-            target(17)
+            minimumToolchain(21)
+            target(21)
         }
 
         github("incendo", "interfaces") {
