@@ -362,7 +362,7 @@ public final class ChestView implements
 
         this.panes.sort(Comparator.comparingInt(pane -> pane.context().priority()));
 
-        for (final var completedPane : this.panes) {
+        for (final var completedPane : List.copyOf(this.panes)) {
             Map<Vector2, ItemStackElement<ChestPane>> elements = completedPane.pane().chestElements();
 
             for (Vector2 position : elements.keySet()) {
