@@ -181,6 +181,18 @@ public final class HashMapInterfaceArguments implements MutableInterfaceArgument
         }
 
         /**
+         * Puts a null value at the given key.
+         *
+         * @param key   the key
+         * @param <T>   the type
+         * @return the builder
+         */
+        public <T> HashMapInterfaceArguments.@NonNull Builder empty(final @NonNull ArgumentKey<T> key) {
+            this.argumentMap.put(key, () -> null);
+            return this;
+        }
+
+        /**
          * Builds the argument.
          *
          * @return the argument
