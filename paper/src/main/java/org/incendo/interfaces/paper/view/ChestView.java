@@ -14,7 +14,7 @@ import org.incendo.interfaces.core.Interface;
 import org.incendo.interfaces.core.transform.InterfaceProperty;
 import org.incendo.interfaces.core.arguments.InterfaceArguments;
 import org.incendo.interfaces.core.element.Element;
-import org.incendo.interfaces.core.transform.InterruptUpdateException;
+import org.incendo.interfaces.core.transform.TransformContext;
 import org.incendo.interfaces.core.util.Vector2;
 import org.incendo.interfaces.core.view.InterfaceView;
 import org.incendo.interfaces.core.view.SelfUpdatingInterfaceView;
@@ -36,6 +36,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * The view of a chest.
@@ -99,73 +100,71 @@ public final class ChestView implements
         this.backing = backing;
         this.arguments = arguments;
         this.title = title;
-
-        try {
-            this.pane = this.updatePane(true);
-        } catch (final InterruptUpdateException ignored) {
-            this.pane = new ChestPane(this.backing.rows());
-        }
-
         this.plugin = Objects.requireNonNullElseGet(
                 PaperInterfaceListeners.plugin(),
                 () -> JavaPlugin.getProvidingPlugin(this.getClass())
         );
-
-        if (Bukkit.isPrimaryThread()) {
-            this.inventory = this.createInventory();
-        } else {
-            try {
-                Bukkit.getScheduler().callSyncMethod(this.plugin, () -> {
-                    this.inventory = this.createInventory();
-
-                    return null;
-                }).get();
-            } catch (final Exception e) {
-                throw new RuntimeException(e);
-            }
-        }
+        this.pane = new ChestPane(this.backing.rows());
     }
 
-    private @NonNull ChestPane updatePane(final boolean firstApply) {
-        for (final var transform : this.backing.transformations()) {
-            ChestPane newPane = transform.transform().apply(new ChestPane(this.backing.rows()), this);
+    private @NonNull CompletableFuture<ChestPane> updatePane(final boolean firstApply) {
+        final var futures = new CompletableFuture<?>[this.backing.transformations().size()];
+        for (var i = 0; i < this.backing.transformations().size(); i++) {
+            final var transformContext = this.backing.transformations().get(i);
+            futures[i] = this.transformToFuture(transformContext);
             // If it's the first time we apply the transform, then
             // we add update listeners to all the dependent properties
             if (firstApply) {
-                for (final InterfaceProperty<?> property : transform.properties()) {
+                for (final InterfaceProperty<?> property : transformContext.properties()) {
                     property.addListener(this, (reference, oldValue, newValue) -> reference.updateByProperty(property));
                 }
             }
-
-            this.panes.removeIf(completedPane -> completedPane.context().equals(transform));
-            this.panes.add(new ContextCompletedPane<>(transform, newPane));
         }
-
-        return this.mergePanes();
+        return CompletableFuture.allOf(futures).thenApply(oVoid -> this.mergePanes());
     }
 
-    private @NonNull ChestPane updatePaneByProperty(final @NonNull InterfaceProperty<?> interfaceProperty) {
-        for (final var transform : this.backing.transformations()) {
-            if (!transform.properties().contains(interfaceProperty)) {
+    private @NonNull CompletableFuture<ChestPane> updatePaneByProperty(final @NonNull InterfaceProperty<?> interfaceProperty) {
+        final var futures = new CompletableFuture<?>[this.backing.transformations().size()];
+        for (var i = 0; i < this.backing.transformations().size(); i++) {
+            final var transformContext = this.backing.transformations().get(i);
+            if (!transformContext.properties().contains(interfaceProperty)) {
                 continue;
             }
-
-            ChestPane newPane = transform.transform().apply(new ChestPane(this.backing.rows()), this);
-
-            this.panes.removeIf(completedPane -> completedPane.context().equals(transform));
-            this.panes.add(new ContextCompletedPane<>(transform, newPane));
+            futures[i] = this.transformToFuture(transformContext);
         }
 
-        return this.mergePanes();
+        return CompletableFuture.allOf(futures).thenApply(oVoid -> this.mergePanes());
+    }
+
+    private CompletableFuture<ChestPane> transformToFuture(final TransformContext<ChestPane, PlayerViewer> transformContext) {
+        final var transform = transformContext.transform();
+        final CompletableFuture<ChestPane> future;
+        if (transform.async()) {
+            future = CompletableFuture.supplyAsync(() -> transform.apply(new ChestPane(this.backing.rows()), this));
+        } else {
+            future = CompletableFuture.completedFuture(transform.apply(new ChestPane(this.backing.rows()), this));
+        }
+        return future.whenComplete((pane, throwable) -> {
+            if (throwable != null) {
+                this.plugin.getLogger().warning("Failed to apply transformation: " + throwable.getMessage());
+                return;
+            }
+            this.panes.removeIf(completedPane -> completedPane.context().equals(transformContext));
+            this.panes.add(new ContextCompletedPane<>(transformContext, pane));
+        });
     }
 
     private void updateByProperty(final @NonNull InterfaceProperty<?> interfaceProperty) {
-        try {
-            this.pane = this.updatePaneByProperty(interfaceProperty);
-        } catch (final InterruptUpdateException ignored) {
-            return;
-        }
-        this.reApplySync();
+        this.updatePaneByProperty(interfaceProperty).whenComplete(
+                (pane, throwable) -> {
+                    if (throwable != null) {
+                        this.plugin.getLogger().warning("Failed to update interface by property: " + throwable.getMessage());
+                        return;
+                    }
+                    this.pane = pane;
+                    this.reApplySync();
+                }
+        );
     }
 
     private boolean isOpen(final boolean firstOpen) {
@@ -245,13 +244,16 @@ public final class ChestView implements
         if (!this.viewer.player().isOnline()) {
             return;
         }
-
-        try {
-            this.pane = this.updatePane(false);
-        } catch (final InterruptUpdateException ignored) {
-            return;
-        }
-        this.reApplySync();
+        this.updatePane(false).whenComplete(
+                (pane, throwable) -> {
+                    if (throwable != null) {
+                        this.plugin.getLogger().warning("Failed to update interface: " + throwable.getMessage());
+                        return;
+                    }
+                    this.pane = pane;
+                    this.reApplySync();
+                }
+        );
     }
 
     private void reApplySync() {
@@ -261,7 +263,6 @@ public final class ChestView implements
             try {
                 Bukkit.getScheduler().callSyncMethod(this.plugin, () -> {
                     this.reapplyInventory(false);
-
                     return null;
                 }).get();
             } catch (final Exception e) {
@@ -308,8 +309,31 @@ public final class ChestView implements
 
     @Override
     public void open() {
-        this.viewer.open(this);
-        this.emitEvent();
+        this.updatePane(true).whenComplete(
+                (pane, throwable) -> {
+                    if (throwable != null) {
+                        this.plugin.getLogger().warning("Failed to first update interface: " + throwable.getMessage());
+                        return;
+                    }
+                    this.pane = pane;
+                    if (Bukkit.isPrimaryThread()) {
+                        this.inventory = this.createInventory();
+                        this.viewer.open(this);
+                        this.emitEvent();
+                    } else {
+                        try {
+                            Bukkit.getScheduler().callSyncMethod(this.plugin, () -> {
+                                this.inventory = this.createInventory();
+                                this.viewer.open(this);
+                                this.emitEvent();
+                                return null;
+                            }).get();
+                        } catch (final Exception e) {
+                            throw new RuntimeException(e);
+                        }
+                    }
+                }
+        );
     }
 
     @Override

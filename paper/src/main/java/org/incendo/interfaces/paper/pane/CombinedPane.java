@@ -18,7 +18,7 @@ public final class CombinedPane implements GridPane<CombinedPane, ItemStackEleme
 
     private final @NonNull Map<@NonNull Vector2, @NonNull ItemStackElement<CombinedPane>> elements;
 
-    private final ItemStackElement<CombinedPane>[] hotbar;
+    private final ItemStackElement[] hotbar;
 
     private final int rows;
 
