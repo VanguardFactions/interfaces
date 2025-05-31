@@ -124,16 +124,17 @@ public final class ChestView implements
     }
 
     private @NonNull CompletableFuture<ChestPane> updatePaneByProperty(final @NonNull InterfaceProperty<?> interfaceProperty) {
-        final var futures = new CompletableFuture<?>[this.backing.transformations().size()];
+        final var futures = new ArrayList<CompletableFuture<?>>();
         for (var i = 0; i < this.backing.transformations().size(); i++) {
             final var transformContext = this.backing.transformations().get(i);
             if (!transformContext.properties().contains(interfaceProperty)) {
                 continue;
             }
-            futures[i] = this.transformToFuture(transformContext);
+            futures.add(this.transformToFuture(transformContext));
         }
 
-        return CompletableFuture.allOf(futures).thenApply(oVoid -> this.mergePanes());
+        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                .thenApply(oVoid -> this.mergePanes());
     }
 
     private CompletableFuture<ChestPane> transformToFuture(final TransformContext<ChestPane, PlayerViewer> transformContext) {
